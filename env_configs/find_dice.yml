@@ -20,4 +20,8 @@ symk_selection: unordered
 symk_direction: fw
 symk_simple: true
 from_scratch: true
-record_interval: 0.1  # seconds
+
+# Video recording settings
+record: false            # set to true to enable video recording (slows down execution)
+record_camera: external  # camera mode: "external" (fixed diagonal view) or "robot" (onboard camera)
+record_interval: 0.1     # interval between frames in seconds

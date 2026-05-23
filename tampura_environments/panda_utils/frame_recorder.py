@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 
 import imageio.v3 as iio
 
@@ -14,7 +14,8 @@ class FrameRecorder:
 
     Usage::
 
-        recorder = FrameRecorder(lambda: self.world, save_dir, interval=0.1)
+        capture_fn = make_external_capture_fn(lambda: self.world, camera_pos, target_pos)
+        recorder = FrameRecorder(capture_fn, save_dir, interval=0.1)
 
         with recorder:
             env.step(...)   # frames captured throughout action execution
@@ -22,25 +23,34 @@ class FrameRecorder:
         recorder.make_gif()
     """
 
-    def __init__(self, world_getter: Callable, save_dir: str, interval: float = 0.1):
-        self._world_getter = world_getter
+    def __init__(
+        self,
+        capture_fn: Callable[[], Optional[Any]],
+        save_dir: str,
+        interval: float = 0.1,
+        enabled: bool = True,
+    ):
+        self._capture_fn = capture_fn
         self._frame_dir = Path(save_dir) / "frames"
         self._interval = interval
+        self._enabled = enabled
         self._count = 0
         self._stop_event: Optional[threading.Event] = None
         self._thread: Optional[threading.Thread] = None
 
     def __enter__(self) -> FrameRecorder:
-        """``with recorder:`` の開始時に呼ばれる。バックグラウンドスレッドを起動する。"""
-        self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
+        """``with recorder:`` の開始時に呼ばれる。``enabled=True`` のときのみバックグラウンドスレッドを起動する。"""
+        if self._enabled:
+            self._stop_event = threading.Event()
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
         return self
 
-    def __exit__(self, *_) -> None:
-        """``with`` ブロックを抜けるときに呼ばれる（例外発生時も含む）。スレッドを停止して合流する。"""
-        self._stop_event.set()
-        self._thread.join()
+    def __exit__(self, *_: Any) -> None:
+        """``with`` ブロックを抜けるときに呼ばれる（例外発生時も含む）。``enabled=True`` のときのみスレッドを停止して合流する。"""
+        if self._enabled:
+            self._stop_event.set()
+            self._thread.join()
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():
@@ -48,24 +58,21 @@ class FrameRecorder:
             self._stop_event.wait(self._interval)
 
     def _capture(self) -> None:
-        """ロボットのカメラ位置から1フレームを撮影し、連番 PNG として保存する。``world`` が未初期化の場合は何もしない。"""
-        world = self._world_getter()
-        if world is None:
+        """``capture_fn`` を呼び出して1フレームを取得し、連番 PNG として保存する。``capture_fn`` が ``None`` を返した場合は何もしない。"""
+        rgb = self._capture_fn()
+        if rgb is None:
             return
         self._frame_dir.mkdir(exist_ok=True)
-        camera_pose = world.robot.camera.get_pose(client=world.client)
-        camera_matrix = world.robot.camera.camera_matrix
-        camera_image = pbu.get_image_at_pose(
-            camera_pose, camera_matrix, tiny=True, client=world.client
-        )
         iio.imwrite(
             self._frame_dir / f"frame_{self._count:05d}.png",
-            camera_image.rgbPixels[:, :, :3],
+            rgb,
         )
         self._count += 1
 
     def make_gif(self) -> None:
-        """保存済みの PNG フレームをまとめて ``generated.gif`` に変換する。フレームが1枚もない場合は何もしない。"""
+        """保存済みの PNG フレームをまとめて ``generated.gif`` に変換する。``enabled=False`` またはフレームが1枚もない場合は何もしない。"""
+        if not self._enabled:
+            return
         png_paths = sorted(self._frame_dir.glob("*.png"))
         if not png_paths:
             return
@@ -76,3 +83,53 @@ class FrameRecorder:
             duration=0.05,
             loop=0,
         )
+
+
+def make_robot_capture_fn(world_getter: Callable) -> Callable[[], Optional[Any]]:
+    """ロボットの搭載カメラからフレームを取得する ``capture_fn`` を返す。"""
+    def capture() -> Optional[Any]:
+        world = world_getter()
+        if world is None:
+            return None
+        camera_pose = world.robot.camera.get_pose(client=world.client)
+        camera_matrix = world.robot.camera.camera_matrix
+        img = pbu.get_image_at_pose(
+            camera_pose, camera_matrix, tiny=True, client=world.client
+        )
+        return img.rgbPixels[:, :, :3]
+    return capture
+
+
+def make_external_capture_fn(
+    world_getter: Callable,
+    camera_pos: Tuple[float, float, float],
+    target_pos: Tuple[float, float, float],
+    width: int = 640,
+    height: int = 480,
+    vertical_fov: float = 60.0,
+) -> Callable[[], Optional[Any]]:
+    """ワールド座標系に固定された外部カメラからフレームを取得する ``capture_fn`` を返す。
+
+    Args:
+        world_getter: ``World`` インスタンスを返す callable。``None`` を返した場合はフレームをスキップする。
+        camera_pos: カメラ位置 (x, y, z)。
+        target_pos: カメラが向く注視点 (x, y, z)。
+        width: 画像幅（ピクセル）。
+        height: 画像高さ（ピクセル）。
+        vertical_fov: 垂直画角（度）。
+    """
+    def capture() -> Optional[Any]:
+        world = world_getter()
+        if world is None:
+            return None
+        img = pbu.get_image(
+            camera_pos=camera_pos,
+            target_pos=target_pos,
+            width=width,
+            height=height,
+            vertical_fov=vertical_fov,
+            tiny=True,
+            client=world.client,
+        )
+        return img.rgbPixels[:, :, :3]
+    return capture

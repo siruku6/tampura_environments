@@ -34,7 +34,11 @@ from tampura_environments.panda_utils.robot import (CAMERA_FRAME,
                                                     PANDA_TOOL_TIP)
 from tampura_environments.panda_utils.voxel_utils import VoxelGrid
 from tampura_environments.custom_utils.paths import APP_ROOT_DIR
-from tampura_environments.panda_utils.frame_recorder import FrameRecorder
+from tampura_environments.panda_utils.frame_recorder import (
+    FrameRecorder,
+    make_external_capture_fn,
+    make_robot_capture_fn,
+)
 
 
 GRID_RESOLUTION = 0.015
@@ -801,10 +805,22 @@ class FindDiceEnv(TampuraEnv):
     def __init__(self, *args, **kwargs):
         super(FindDiceEnv, self).__init__(*args, **kwargs)
         self.world = None
+
+        world_getter = lambda: self.world
+        camera_mode = self.config.get("record_camera", "external")
+        if camera_mode == "robot":
+            capture_fn = make_robot_capture_fn(world_getter)
+        else:
+            capture_fn = make_external_capture_fn(
+                world_getter,
+                camera_pos=(-0.3, -0.6, 0.5),
+                target_pos=(0.5, 0.0, 0.1),
+            )
         self._recorder = FrameRecorder(
-            world_getter=lambda: self.world,
+            capture_fn=capture_fn,
             save_dir=self.save_dir,
             interval=self.config.get("record_interval", 0.1),
+            enabled=self.config.get("record", False),
         )
 
     def get_scene_data(self):
