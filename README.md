@@ -21,3 +21,6 @@ python run_planner.py --config=./env_configs/class_uncertain.yml --vis=1 --globa
 
 python run_planner.py --config=./env_configs/puck_slide.yml --vis=1 --global-seed=0 --vis-graph=1
 ```
+
+> [!WARNING]
+> If you are running the environments on a headless server, set `--vis=0` to avoid freeze during initialization. You can still visualize the belief graph by setting `--vis-graph=1`.

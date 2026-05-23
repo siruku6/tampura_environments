@@ -6,6 +6,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -32,6 +33,8 @@ from tampura_environments.panda_utils.robot import (CAMERA_FRAME,
                                                     DEFAULT_ARM_POS,
                                                     PANDA_TOOL_TIP)
 from tampura_environments.panda_utils.voxel_utils import VoxelGrid
+from tampura_environments.custom_utils.paths import APP_ROOT_DIR
+
 
 GRID_RESOLUTION = 0.015
 SIM_CLIENT_ID = 2
@@ -799,13 +802,13 @@ class FindDiceEnv(TampuraEnv):
         self.world = None
 
     def get_scene_data(self):
-        dataset_dir = "tampura_environments/find_dice/problems"
+        dataset_dir: Path = APP_ROOT_DIR / "tampura_environments/find_dice/problems"
         world_json_file = random.choice(os.listdir(dataset_dir))
 
         logging.info("Loading scene from {}".format(world_json_file))
 
         # Load json from file
-        with open(os.path.join(dataset_dir, world_json_file)) as f:
+        with open(dataset_dir / world_json_file) as f:
             scene_data_json = json.load(f)
 
         return scene_data_json
@@ -815,6 +818,9 @@ class FindDiceEnv(TampuraEnv):
 
     def initialize(self) -> Tuple[SceneBelief, AliasStore]:
         store = AliasStore()
+
+        if self.vis == 1:
+            print("[WARNING] Does your OS have a display? If not, set vis to 0 to avoid freeze.")
 
         state_vis = self.vis
         belief_vis = False
