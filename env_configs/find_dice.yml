@@ -20,3 +20,4 @@ symk_selection: unordered
 symk_direction: fw
 symk_simple: true
 from_scratch: true
+record_interval: 0.1  # seconds
