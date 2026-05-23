@@ -8,6 +8,8 @@ import random
 import time
 
 import numpy as np
+from tqdm.auto import tqdm
+
 import tampura
 from tampura.config import config as tconfig
 
@@ -23,7 +25,7 @@ def create_parser():
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="The config file to load from")
-    parser.add_argument("--task", type=str),
+    parser.add_argument("--task", type=str)
     parser.add_argument("--planner", type=str)
     parser.add_argument(
         "--global-seed",
@@ -31,14 +33,12 @@ def create_parser():
         type=int,
     )
     parser.add_argument(
-        "--vis",
+        "--vis", action="store_true", default=False,
         help="A flag enabling visualization of the pybullet execution",
-        type=bool,
     )
     parser.add_argument(
-        "--vis-graph",
+        "--vis-graph", action="store_true", default=False,
         help="A flag enabling visualization of the learned transition graphs",
-        type=bool,
     )
     parser.add_argument(
         "--print-options",
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     if "load" in config and config["load"] is not None:
         pkl_files = [
             os.path.join(root, file)
-            for root, _, files in os.walk(config["load"])
+            for root, _, files in tqdm(os.walk(config["load"]))
             for file in files
             if file.endswith(".pkl")
         ]

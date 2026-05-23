@@ -22,6 +22,7 @@ dependencies = [
     "stable_baselines3>=2.3.2",
     "tensorboard>=2.18.0",
     "imageio>=2.37.0",
+    "tqdm>=4.67.3",
     "tampura @ git+https://github.com/aidan-curtis/tampura.git"
 ]
 
