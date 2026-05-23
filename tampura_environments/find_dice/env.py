@@ -800,6 +800,7 @@ class FindDiceEnv(TampuraEnv):
     def __init__(self, *args, **kwargs):
         super(FindDiceEnv, self).__init__(*args, **kwargs)
         self.world = None
+        self._step_count = 0
 
     def get_scene_data(self):
         dataset_dir: Path = APP_ROOT_DIR / "tampura_environments/find_dice/problems"
@@ -812,6 +813,42 @@ class FindDiceEnv(TampuraEnv):
             scene_data_json = json.load(f)
 
         return scene_data_json
+
+    def step(self, action, belief, store):
+        obs = super().step(action, belief, store)
+        self._save_frame()
+        return obs
+
+    def _save_frame(self):
+        import imageio.v3 as iio
+        if self.world is None:
+            return
+        frame_dir = Path(self.save_dir) / "frames"
+        frame_dir.mkdir(exist_ok=True)
+        camera_pose = self.world.robot.camera.get_pose(client=self.world.client)
+        camera_matrix = self.world.robot.camera.camera_matrix
+        camera_image = pbu.get_image_at_pose(
+            camera_pose, camera_matrix, tiny=True, client=self.world.client
+        )
+        iio.imwrite(
+            frame_dir / f"frame_{self._step_count:03d}.png",
+            camera_image.rgbPixels[:, :, :3],
+        )
+        self._step_count += 1
+
+    def wrapup(self):
+        import imageio.v3 as iio
+        frame_dir = Path(self.save_dir) / "frames"
+        png_paths = sorted(frame_dir.glob("*.png"))
+        if not png_paths:
+            return
+        images = [iio.imread(p) for p in png_paths]
+        iio.imwrite(
+            Path(self.save_dir) / "generated.gif",
+            images,
+            duration=0.05,
+            loop=0,
+        )
 
     def vis_updated_belief(self, belief: SceneBelief, store: AliasStore):
         belief.visibility_grid.draw_intervals(self.world.client)
