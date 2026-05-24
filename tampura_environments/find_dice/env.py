@@ -802,7 +802,7 @@ def placement_sample_fn_wrapper(world):
 
 
 class FindDiceEnv(TampuraEnv):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(FindDiceEnv, self).__init__(*args, **kwargs)
         self.world = None
 
@@ -813,8 +813,24 @@ class FindDiceEnv(TampuraEnv):
         else:
             capture_fn = make_external_capture_fn(
                 world_getter,
-                camera_pos=(-0.3, -0.6, 0.5),
-                target_pos=(0.5, 0.0, 0.1),
+                # small
+                # camera_pos=(-0.2, -1.0, 0.85),
+                # target_pos=(0.3, 0.0, 0.25),
+                # vertical_fov=30.0,
+
+                # OK
+                # camera_pos=(-0.2, -0.9, 0.65),
+                # target_pos=(0.25, 0.0, 0.25),
+                # vertical_fov=30.0,
+
+                # better for gif
+                # camera_pos=(-0.2, -0.75, 0.65),
+                # target_pos=(0.25, 0.0, 0.25),
+                # vertical_fov=30.0,
+
+                camera_pos=(0.55, -0.65, 0.60),
+                target_pos=(0.25, 0.0, 0.25),
+                vertical_fov=30.0,
             )
         self._recorder = FrameRecorder(
             capture_fn=capture_fn,

@@ -96,7 +96,9 @@ def make_robot_capture_fn(world_getter: Callable) -> Callable[[], Optional[Any]]
         img = pbu.get_image_at_pose(
             camera_pose, camera_matrix, tiny=True, client=world.client
         )
-        return img.rgbPixels[:, :, :3]
+        # Flip vertically: PyBullet returns images in OpenGL convention (origin=bottom-left),
+        # but NumPy/imageio expects origin=top-left.
+        return img.rgbPixels[::-1, :, :3]
     return capture
 
 
@@ -131,5 +133,7 @@ def make_external_capture_fn(
             tiny=True,
             client=world.client,
         )
-        return img.rgbPixels[:, :, :3]
+        # Flip vertically: PyBullet returns images in OpenGL convention (origin=bottom-left),
+        # but NumPy/imageio expects origin=top-left.
+        return img.rgbPixels[::-1, :, :3]
     return capture
