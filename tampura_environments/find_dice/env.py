@@ -34,6 +34,11 @@ from tampura_environments.panda_utils.robot import (CAMERA_FRAME,
                                                     PANDA_TOOL_TIP)
 from tampura_environments.panda_utils.voxel_utils import VoxelGrid
 from tampura_environments.custom_utils.paths import APP_ROOT_DIR
+from tampura_environments.panda_utils.frame_recorder import (
+    FrameRecorder,
+    make_external_capture_fn,
+    make_robot_capture_fn,
+)
 
 
 GRID_RESOLUTION = 0.015
@@ -797,9 +802,42 @@ def placement_sample_fn_wrapper(world):
 
 
 class FindDiceEnv(TampuraEnv):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(FindDiceEnv, self).__init__(*args, **kwargs)
         self.world = None
+
+        world_getter = lambda: self.world
+        camera_mode = self.config.get("record_camera", "external")
+        if camera_mode == "robot":
+            capture_fn = make_robot_capture_fn(world_getter)
+        else:
+            capture_fn = make_external_capture_fn(
+                world_getter,
+                # small
+                # camera_pos=(-0.2, -1.0, 0.85),
+                # target_pos=(0.3, 0.0, 0.25),
+                # vertical_fov=30.0,
+
+                # OK
+                # camera_pos=(-0.2, -0.9, 0.65),
+                # target_pos=(0.25, 0.0, 0.25),
+                # vertical_fov=30.0,
+
+                # better for gif
+                # camera_pos=(-0.2, -0.75, 0.65),
+                # target_pos=(0.25, 0.0, 0.25),
+                # vertical_fov=30.0,
+
+                camera_pos=(0.55, -0.65, 0.60),
+                target_pos=(0.25, 0.0, 0.25),
+                vertical_fov=30.0,
+            )
+        self._recorder = FrameRecorder(
+            capture_fn=capture_fn,
+            save_dir=self.save_dir,
+            interval=self.config.get("record_interval", 0.1),
+            enabled=self.config.get("record", False),
+        )
 
     def get_scene_data(self):
         dataset_dir: Path = APP_ROOT_DIR / "tampura_environments/find_dice/problems"
@@ -812,6 +850,13 @@ class FindDiceEnv(TampuraEnv):
             scene_data_json = json.load(f)
 
         return scene_data_json
+
+    def step(self, action, belief, store):
+        with self._recorder:
+            return super().step(action, belief, store)
+
+    def wrapup(self):
+        self._recorder.make_gif()
 
     def vis_updated_belief(self, belief: SceneBelief, store: AliasStore):
         belief.visibility_grid.draw_intervals(self.world.client)
