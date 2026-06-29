@@ -852,8 +852,10 @@ class FindDiceEnv(TampuraEnv):
         return scene_data_json
 
     def step(self, action, belief, store):
-        with self._recorder:
-            return super().step(action, belief, store)
+        self.state.frame_callback = self._recorder.make_step_callback()
+        result = super().step(action, belief, store)
+        self.state.frame_callback = None
+        return result
 
     def wrapup(self):
         self._recorder.make_gif()

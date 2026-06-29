@@ -621,6 +621,9 @@ class SceneState(State):
         self, sequence: List[Command], teleport=False, sim_steps=0, time_step=5e-3
     ):  # None | INF
         assert sequence is not None
+        frame_callback = getattr(self, "frame_callback", None)
+        if frame_callback is not None:
+            teleport = False  # animate trajectory so per-step frames are meaningful
         for command in sequence:
             if not isinstance(command, GroupTrajectory) or len(command.path) > 0:
                 for _ in command.iterate(
@@ -635,6 +638,9 @@ class SceneState(State):
 
                         for _ in range(sim_steps):
                             self.world.client.stepSimulation()
+
+                    if frame_callback is not None:
+                        frame_callback()
 
                     time.sleep(time_step)
 
