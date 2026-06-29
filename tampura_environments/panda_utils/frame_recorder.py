@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import threading
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import imageio.v3 as iio
 
@@ -10,17 +9,18 @@ import tampura_environments.panda_utils.pb_utils as pbu
 
 
 class FrameRecorder:
-    """Context manager that captures camera frames at a fixed interval in a background thread.
+    """カメラフレームをメモリ上に蓄積し、必要に応じて GIF を書き出すクラス。
 
     Usage::
 
-        capture_fn = make_external_capture_fn(lambda: self.world, camera_pos, target_pos)
         recorder = FrameRecorder(capture_fn, save_dir, interval=0.1)
 
-        with recorder:
-            env.step(...)   # frames captured throughout action execution
+        # env.step() の前後で:
+        state.frame_callback = recorder.make_step_callback()
+        result = super().step(action, belief, store)
+        state.frame_callback = None
 
-        recorder.make_gif()
+        recorder.make_gif()   # 全ステップ終了後に GIF を書き出す
     """
 
     def __init__(
@@ -31,56 +31,49 @@ class FrameRecorder:
         enabled: bool = True,
     ):
         self._capture_fn = capture_fn
-        self._frame_dir = Path(save_dir) / "frames"
+        self._save_dir = Path(save_dir)
         self._interval = interval
         self._enabled = enabled
-        self._count = 0
-        self._stop_event: Optional[threading.Event] = None
-        self._thread: Optional[threading.Thread] = None
-
-    def __enter__(self) -> FrameRecorder:
-        """``with recorder:`` の開始時に呼ばれる。``enabled=True`` のときのみバックグラウンドスレッドを起動する。"""
-        if self._enabled:
-            self._stop_event = threading.Event()
-            self._thread = threading.Thread(target=self._loop, daemon=True)
-            self._thread.start()
-        return self
-
-    def __exit__(self, *_: Any) -> None:
-        """``with`` ブロックを抜けるときに呼ばれる（例外発生時も含む）。``enabled=True`` のときのみスレッドを停止して合流する。"""
-        if self._enabled:
-            self._stop_event.set()
-            self._thread.join()
-
-    def _loop(self) -> None:
-        while not self._stop_event.is_set():
-            self._capture()
-            self._stop_event.wait(self._interval)
+        self._frames: List[Any] = []
 
     def _capture(self) -> None:
-        """``capture_fn`` を呼び出して1フレームを取得し、連番 PNG として保存する。``capture_fn`` が ``None`` を返した場合は何もしない。"""
+        """``capture_fn`` を呼び出して1フレームを取得し、メモリ上のリストに追加する。``capture_fn`` が ``None`` を返した場合は何もしない。"""
         rgb = self._capture_fn()
-        if rgb is None:
-            return
-        self._frame_dir.mkdir(exist_ok=True)
-        iio.imwrite(
-            self._frame_dir / f"frame_{self._count:05d}.png",
-            rgb,
-        )
-        self._count += 1
+        if rgb is not None:
+            self._frames.append(rgb)
+
+    def make_step_callback(self, time_step: float = 5e-3) -> Optional[Callable[[], None]]:
+        """``interval`` シミュレーション秒ごとに1フレームを取得するコールバックを返す。
+
+        返り値を実行前に ``SceneState.frame_callback`` へ代入して使用する。
+        ``enabled=False`` のときは ``None`` を返すため、呼び出し元は代入をスキップできる。
+        """
+        if not self._enabled:
+            return None
+        steps_per_frame = max(1, round(self._interval / time_step))
+        counter = [0]
+
+        def callback() -> None:
+            counter[0] += 1
+            if counter[0] % steps_per_frame == 0:
+                self._capture()
+
+        return callback
+
+    def capture_frame(self) -> None:
+        """モーションを伴わないイベント向けの単発フレーム取得（同期）。"""
+        if self._enabled:
+            self._capture()
 
     def make_gif(self) -> None:
-        """保存済みの PNG フレームをまとめて ``generated.gif`` に変換する。``enabled=False`` またはフレームが1枚もない場合は何もしない。"""
-        if not self._enabled:
+        """メモリ上のフレームをまとめて ``generated.gif`` に書き出す。``enabled=False`` またはフレームが1枚もない場合は何もしない。"""
+        if not self._enabled or not self._frames:
             return
-        png_paths = sorted(self._frame_dir.glob("*.png"))
-        if not png_paths:
-            return
-        images = [iio.imread(p) for p in png_paths]
+        self._save_dir.mkdir(parents=True, exist_ok=True)
         iio.imwrite(
-            self._frame_dir.parent / "generated.gif",
-            images,
-            duration=0.05,
+            self._save_dir / "generated.gif",
+            self._frames,
+            duration=0.05,  # seconds per frame → 20 fps
             loop=0,
         )
 
@@ -96,8 +89,7 @@ def make_robot_capture_fn(world_getter: Callable) -> Callable[[], Optional[Any]]
         img = pbu.get_image_at_pose(
             camera_pose, camera_matrix, tiny=True, client=world.client
         )
-        # Flip vertically: PyBullet returns images in OpenGL convention (origin=bottom-left),
-        # but NumPy/imageio expects origin=top-left.
+        # Flip: PyBullet uses OpenGL origin (bottom-left); NumPy/imageio expects top-left.
         return img.rgbPixels[::-1, :, :3]
     return capture
 
@@ -133,7 +125,6 @@ def make_external_capture_fn(
             tiny=True,
             client=world.client,
         )
-        # Flip vertically: PyBullet returns images in OpenGL convention (origin=bottom-left),
-        # but NumPy/imageio expects origin=top-left.
+        # Flip: PyBullet uses OpenGL origin (bottom-left); NumPy/imageio expects top-left.
         return img.rgbPixels[::-1, :, :3]
     return capture
