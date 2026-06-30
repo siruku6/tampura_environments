@@ -1232,11 +1232,17 @@ def aabb_union(aabbs: list[AABB]):
     return AABB(lower, upper)
 
 
-def get_aabb(body, link=None, client=None, **kwargs):
+def get_aabb(body, link=None, client=None, **kwargs) -> AABB:
     client = client or DEFAULT_CLIENT
     if link is None:
         return aabb_union(get_aabbs(body, client=client, **kwargs))
     return AABB(*client.getAABB(int(body), linkIndex=link))
+
+
+def get_oobb(body, link=None, client=None, **kwargs) -> OOBB:
+    aabb = get_aabb(body, client=client, **kwargs)
+    pose = get_pose(body, client=client, **kwargs)
+    return OOBB(aabb, pose)
 
 
 def get_body_info(body, client=None, **kwargs):
