@@ -775,30 +775,6 @@ def create_obj(path, scale=1.0, mass=STATIC_MASS, color=GREY, **kwargs):
     return body
 
 
-def load_pybullet(filename, fixed_base=False, scale=1.0, client=None, **kwargs):
-    # fixed_base=False implies infinite base mass
-    client = client or DEFAULT_CLIENT
-    with LockRenderer(client=client):
-        flags = get_urdf_flags(**kwargs)
-        if filename.endswith(".urdf"):
-            body = client.loadURDF(
-                filename, useFixedBase=fixed_base, flags=flags, globalScaling=scale
-            )
-        elif filename.endswith(".sdf"):
-            body = client.loadSDF(filename)
-        elif filename.endswith(".xml"):
-            body = client.loadMJCF(filename, flags=flags)
-        elif filename.endswith(".bullet"):
-            body = client.loadBullet(filename)
-        elif filename.endswith(".obj"):
-            # TODO: fixed_base => mass = 0?
-            body = create_obj(filename, scale=scale, client=client, **kwargs)
-        else:
-            raise ValueError(filename)
-    INFO_FROM_BODY[CLIENT, body] = ModelInfo(None, filename, fixed_base, scale)
-    return body
-
-
 def unit_point():
     return (0.0, 0.0, 0.0)
 
@@ -1473,10 +1449,6 @@ def pairwise_collision(body1, body2, **kwargs):
     return body_collision(body1, body2, **kwargs)
 
 
-def get_base_name(body, **kwargs):
-    return get_body_info(body, **kwargs).base_name.decode(encoding="UTF-8")
-
-
 def link_from_name(body, name, **kwargs):
     if name == get_base_name(body, **kwargs):
         return BASE_LINK
@@ -1593,13 +1565,6 @@ def violates_limits(body, joints, values, **kwargs):
     )
 
 
-def violates_limits(body, joints, values, **kwargs):
-    return any(
-        violates_limit(body, joint, value, **kwargs)
-        for joint, value in zip(joints, values)
-    )
-
-
 def set_joint_positions(body, joints, values, **kwargs):
     for joint, value in safe_zip(joints, values):
         set_joint_position(body, joint, value, **kwargs)
@@ -1647,10 +1612,6 @@ def quat_from_pose(pose):
 
 def tform_point(affine, point):
     return point_from_pose(multiply(affine, Pose(point=point)))
-
-
-def get_joint_name(body, joint, **kwargs):
-    return get_joint_info(body, joint, **kwargs).jointName.decode("UTF-8")
 
 
 def get_joint_names(body, joints, **kwargs):
@@ -3326,20 +3287,6 @@ def inverse_kinematics(
         return None
 
     return conf
-
-
-def get_extend_fn(body, joints, resolutions=None, norm=2, **kwargs):
-    resolutions = get_default_resolutions(body, joints, resolutions, **kwargs)
-    difference_fn = get_difference_fn(body, joints, **kwargs)
-
-    def fn(q1, q2):
-        steps = int(
-            np.linalg.norm(np.divide(difference_fn(q2, q1), resolutions), ord=norm)
-        )
-        refine_fn = get_refine_fn(body, joints, num_steps=steps, **kwargs)
-        return refine_fn(q1, q2)
-
-    return fn
 
 
 def recenter_oobb(oobb: OOBB):
