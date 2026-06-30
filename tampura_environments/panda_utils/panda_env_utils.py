@@ -311,7 +311,9 @@ def get_grasp_candidates(obj, gripper_width=np.inf, grasp_mode="mesh", **kwargs)
         else:
             return tuple([])
     elif grasp_mode == "top":
-        aabb, pose = pbu.get_oobb(obj, **kwargs)
+        oobb = pbu.get_oobb(obj,**kwargs)
+        aabb = oobb.aabb
+        pose = oobb.pose
         cand = pbu.get_top_and_bottom_grasps(
             obj, aabb, pose, tool_pose=TOOL_POSE, grasp_length=0.01, **kwargs
         )

@@ -1,0 +1,35 @@
+# Usage:
+# python run_planner.py  --config env_configs/find_block_stack_dice.yml 
+
+task: find_block_stack_dice
+global_seed: 0
+vis: false
+vis_graph: false
+print_options: s,b,ab,r,a,o,sp,bp,abp,rp
+max_steps: 35
+batch_size: 20
+num_skeletons: 10
+flat_sample: true
+flat_width: 5
+pwa: 0.2
+pwk: 3.0
+envelope_threshold: 1
+num_samples: 200
+gamma: 0.98
+planner: tampura_policy
+learning_strategy: bayes_optimistic
+decision_strategy: prob
+symk_selection: unordered
+symk_direction: fw
+symk_simple: true
+from_scratch: true
+
+# Video recording settings
+record: false            # set to true to enable video recording (slows down execution)
+record_camera: external  # camera mode: "external" (fixed diagonal view) or "robot" (onboard camera)
+record_interval: 0.1     # interval between frames in seconds
+
+# Scene parameters
+n_distractor_blocks: 2
+n_distractor_dice: 2
+n_obstacles: 1
