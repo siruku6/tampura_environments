@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import math
@@ -833,25 +832,9 @@ def get_shortened_table_dims():
     return TABLE_POSE, table_width, table_length, table_thickness
 
 
-@contextlib.contextmanager
-def suppress_c_output():
-    # Redirect both stdout and stderr at the OS level
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    old_stdout = os.dup(1)
-    old_stderr = os.dup(2)
-    os.dup2(devnull, 1)
-    os.dup2(devnull, 2)
-    try:
-        yield
-    finally:
-        os.dup2(old_stdout, 1)
-        os.dup2(old_stderr, 2)
-        os.close(devnull)
-
-
 def setup_robot_pybullet(gui=False):
 
-    with suppress_c_output():
+    with pbu.HideOutput():
         client = bc.BulletClient(connection_mode=p.GUI if gui else p.DIRECT)
         client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
         client.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
