@@ -1325,6 +1325,40 @@ def dimensions_from_camera_matrix(camera_matrix: list):
     return width, height
 
 
+def pose_to_vec(pose: "PoseType") -> "np.ndarray":
+    """姿勢 (position, quaternion) を 7 次元ベクトルに変換する。"""
+    return np.array(list(pose[0]) + list(pose[1]))
+
+
+def transformation_to_pose(trans):
+    """4x4 同次変換行列を (position, quaternion) タプルに変換する。"""
+    matrix = np.array(trans)
+    rotation_matrix = matrix[:3, :3]
+    translation_vector = matrix[:3, 3]
+    quaternion = R.from_matrix(rotation_matrix).as_quat()
+    return (translation_vector, quaternion)
+
+
+def pose_to_transformation(pose):
+    """(position, quaternion) タプルを 4x4 同次変換行列に変換する。"""
+    rotation_matrix = R.from_quat(pose[1]).as_matrix()
+    transformation_matrix = np.eye(4)
+    transformation_matrix[:3, :3] = rotation_matrix
+    transformation_matrix[:3, 3] = pose[0]
+    return transformation_matrix
+
+
+def transform_points(matrix, points):
+    """4x4 変換行列で点群（Nx3 配列）をワールド座標系に変換する。"""
+    num_points = points.shape[0]
+    points_homogeneous = np.hstack((points, np.ones((num_points, 1))))
+    transformed_points_homogeneous = np.dot(points_homogeneous, matrix.T)
+    transformed_points = (
+        transformed_points_homogeneous[:, :3] / transformed_points_homogeneous[:, [3]]
+    )
+    return transformed_points
+
+
 def get_collision_data(body, link=BASE_LINK, client=None, **kwargs):
     """指定リンクの衝突形状データリストを返す。"""
     client = client or DEFAULT_CLIENT

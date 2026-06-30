@@ -80,58 +80,10 @@ GRID_RESOLUTION = 0.02
 CLIENT_MAP: Dict[int, Any] = {}
 
 
-def pose_to_vec(pose: pbu.PoseType) -> np.ndarray:
-    """姿勢 (position, quaternion) を 7 次元ベクトルに変換する。"""
-    return np.array(list(pose[0]) + list(pose[1]))
-
-
-def transformation_to_pose(trans):
-    """4x4 同次変換行列を (position, quaternion) タプルに変換する。"""
-    matrix = np.array(trans)
-
-    # Extract the rotation matrix (top-left 3x3)
-    rotation_matrix = matrix[:3, :3]
-
-    # Extract the translation vector (first three elements of the fourth column)
-    translation_vector = matrix[:3, 3]
-
-    # Convert the rotation matrix to a quaternion
-    quaternion = R.from_matrix(rotation_matrix).as_quat()
-    return (translation_vector, quaternion)
-
-
-def pose_to_transformation(pose):
-    """(position, quaternion) タプルを 4x4 同次変換行列に変換する。"""
-    # Convert the quaternion to a rotation matrix
-    rotation_matrix = R.from_quat(pose[1]).as_matrix()
-
-    # Create the transformation matrix
-    transformation_matrix = np.eye(4)  # Initialize a 4x4 identity matrix
-    transformation_matrix[:3, :3] = (
-        rotation_matrix  # Set the top-left 3x3 to the rotation matrix
-    )
-    transformation_matrix[:3, 3] = pose[
-        0
-    ]  # Set the top three elements of the fourth column to the translation vector
-
-    return transformation_matrix
-
-
-def transform_points(matrix, points):
-    """4x4 変換行列で点群（Nx3 配列）をワールド座標系に変換する。"""
-    # Convert points to homogeneous coordinates (add a column of ones)
-    num_points = points.shape[0]
-    points_homogeneous = np.hstack((points, np.ones((num_points, 1))))
-
-    # Apply the transformation matrix
-    transformed_points_homogeneous = np.dot(points_homogeneous, matrix.T)
-
-    # Convert back to Cartesian coordinates
-    transformed_points = (
-        transformed_points_homogeneous[:, :3] / transformed_points_homogeneous[:, [3]]
-    )
-
-    return transformed_points
+pose_to_vec = pbu.pose_to_vec
+transformation_to_pose = pbu.transformation_to_pose
+pose_to_transformation = pbu.pose_to_transformation
+transform_points = pbu.transform_points
 
 
 def plan_workspace_motion(
@@ -929,13 +881,7 @@ def add_table(
     return table, workspace
 
 
-def pixel_from_point(camera_matrix, point_camera, width, height):
-    """カメラ座標系の 3D 点を画像座標（Pixel）に変換する。画面外の場合は None。"""
-    px, py = pbu.pixel_from_ray(camera_matrix, point_camera)
-    if (0 <= px < width) and (0 <= py < height):
-        r, c = np.floor([py, px]).astype(int)
-        return pbu.Pixel(r, c)
-    return None
+pixel_from_point = pbu.pixel_from_point
 
 
 def get_shortened_table_dims():
