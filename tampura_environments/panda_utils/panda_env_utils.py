@@ -81,10 +81,12 @@ CLIENT_MAP: Dict[int, Any] = {}
 
 
 def pose_to_vec(pose: pbu.PoseType) -> np.ndarray:
+    """姿勢 (position, quaternion) を 7 次元ベクトルに変換する。"""
     return np.array(list(pose[0]) + list(pose[1]))
 
 
 def transformation_to_pose(trans):
+    """4x4 同次変換行列を (position, quaternion) タプルに変換する。"""
     matrix = np.array(trans)
 
     # Extract the rotation matrix (top-left 3x3)
@@ -99,6 +101,7 @@ def transformation_to_pose(trans):
 
 
 def pose_to_transformation(pose):
+    """(position, quaternion) タプルを 4x4 同次変換行列に変換する。"""
     # Convert the quaternion to a rotation matrix
     rotation_matrix = R.from_quat(pose[1]).as_matrix()
 
@@ -115,6 +118,7 @@ def pose_to_transformation(pose):
 
 
 def transform_points(matrix, points):
+    """4x4 変換行列で点群（Nx3 配列）をワールド座標系に変換する。"""
     # Convert points to homogeneous coordinates (add a column of ones)
     num_points = points.shape[0]
     points_homogeneous = np.hstack((points, np.ones((num_points, 1))))
@@ -138,6 +142,23 @@ def plan_workspace_motion(
     max_attempts=20,
     **kwargs,
 ):
+    """ツール先端を指定したウェイポイント列に通すカルテシアン空間の経路計画。
+
+    各ウェイポイントに対して IK を解き、衝突のない関節角度列を生成する。
+    IK が失敗した場合はランダムな初期姿勢から最大 max_attempts 回再試行する。
+
+    Args:
+        robot: PandaRobot インスタンス。
+        tool_waypoints: ツール先端が通過すべき姿勢のリスト (position, quaternion)。
+            最初の要素を IK の目標として使用し、補間で中間点を生成する。
+        attachment: 把持中の物体など、ロボットに付随する Attachment。
+            None の場合はアームのみで衝突判定する。
+        obstacles: 衝突判定に含める障害物の物体 ID リスト。
+        max_attempts: IK の再試行回数上限。
+
+    Returns:
+        関節角度列（各要素はアームの関節角度リスト）。経路が見つからない場合は None。
+    """
     assert tool_waypoints
 
     tool_link = pbu.link_from_name(robot, PANDA_TOOL_TIP, **kwargs)
@@ -222,6 +243,7 @@ def plan_workspace_motion(
 
 
 def z_plane(z=0.0):
+    """高さ z の水平面（法線が Z 軸方向の平面）を返す。"""
     normal = Z_AXIS
     origin = z * normal
     return Plane(normal, origin)
@@ -237,6 +259,7 @@ def close_until_collision(
     num_steps=25,
     **kwargs,
 ):
+    """グリッパーを徐々に閉じ、bodies と衝突した直前の関節位置を返す。"""
     if not gripper_joints:
         return None
 
@@ -262,6 +285,25 @@ def close_until_collision(
 
 
 def get_grasp_candidates(obj, gripper_width=np.inf, grasp_mode="mesh", **kwargs):
+    """物体に対する把持候補姿勢を生成する。
+
+    grasp_mode によって生成戦略が変わる：
+
+    - "mesh": 物体のメッシュを解析して把持可能な接触点を探索し、
+      スコア順に最大 10 候補を返す。YCB など形状が既知の物体向け。
+    - "saved": 物体ファイルと同じディレクトリの grasps/*.json から
+      事前計算済みの把持候補をロードする。高速だがファイルが必要。
+    - "top": 物体の上面から垂直に把持する候補のみを生成する。
+      形状を問わず使えるが把持姿勢が限定される。
+
+    Args:
+        obj: PyBullet の物体 ID。
+        gripper_width: グリッパーの最大開口幅（これを超える把持は除外）。
+        grasp_mode: 把持候補の生成方法。"mesh" | "saved" | "top"。
+
+    Returns:
+        把持候補姿勢のイテラブル（各要素はツール先端座標系での把持姿勢）。
+    """
     if grasp_mode == "saved":
         [data] = pbu.get_visual_data(obj, -1, **kwargs)
         filename = pbu.get_data_filename(data)
@@ -321,6 +363,7 @@ def get_grasp_candidates(obj, gripper_width=np.inf, grasp_mode="mesh", **kwargs)
 
 
 def setup_robot(vis=False, camera_matrix=CAMERA_MATRIX) -> Tuple[PandaRobot, int]:
+    """PyBullet を起動して PandaRobot インスタンスを生成し返す。"""
     robot_body, client = setup_robot_pybullet(gui=vis)
 
     robot = PandaRobot(
@@ -332,7 +375,6 @@ def setup_robot(vis=False, camera_matrix=CAMERA_MATRIX) -> Tuple[PandaRobot, int
     return robot, client
 
 
-#######################################################
 def get_grasp(
     world,
     obj,
@@ -343,6 +385,27 @@ def get_grasp(
     max_attempts=float("inf"),
     **kwargs,
 ):
+    """有効な把持を1つ探索して返す。
+
+    get_grasp_candidates で生成した把持候補を順に検証し、衝突のない把持を返す。
+    検証中はグリッパーと物体の姿勢を一時的に変更するが、関数終了時に元の状態に復元する。
+
+    Args:
+        world: World インスタンス（robot・client などを含む）。
+        obj: 把持対象の PyBullet 物体 ID。
+        obstacles: 衝突判定に含める障害物の物体 ID リスト。
+        grasp_mode: 把持候補の生成方法。"mesh" | "saved" | "top"（get_grasp_candidates 参照）。
+        gripper_collisions: True の場合、グリッパーと物体の衝突を検証に含める。
+        closed_fraction: グリッパーを閉じた位置のマージン係数（1.0 より大きい値で少し余分に閉じる）。
+        max_attempts: 候補を試す最大回数。
+
+    Returns:
+        有効な把持が見つかった場合は Grasp オブジェクト。見つからない場合は None。
+
+    Note:
+        内部でグリッパーと物体の姿勢を一時変更する副作用があるが、
+        関数終了時（成功・失敗両方）に元の状態へ復元する。
+    """
     closed_conf, open_conf = world.robot.get_group_limits(GRIPPER_GROUP, **kwargs)
 
     max_width = world.robot.get_max_gripper_width(
@@ -458,6 +521,7 @@ def plan_joint_motion(
     extra_collisions=None,
     **kwargs,
 ):
+    """birrt を用いて関節空間で end_conf への衝突回避経路を計画する。"""
     assert len(joints) == len(end_conf)
     if (weights is None) and (resolutions is not None):
         weights = np.reciprocal(resolutions)
@@ -506,7 +570,7 @@ def plan_motion_fn(
     environment: List[int] = [],
     **kwargs,
 ) -> Optional[GroupTrajectory]:
-
+    """q1 から q2 への衝突回避経路を GroupTrajectory として返す。"""
     obstacles = list(environment)
     attached = {attachment.child for attachment in attachments}
     obstacles = list(set(obstacles) - set(attached))
@@ -552,6 +616,7 @@ def create_block(
     halfExtents: Tuple[float, float, float] = (0.02, 0.02, 0.02),
     client: Any = None,
 ) -> int:
+    """指定した色・位置・サイズのボックス物体を PyBullet シーンに追加する。"""
     # Creating the visual shape with the specified color
     visualShapeId = client.createVisualShape(
         shapeType=client.GEOM_BOX, rgbaColor=color, halfExtents=halfExtents
@@ -575,6 +640,18 @@ def create_block(
 
 @dataclass
 class World:
+    """シミュレーション世界の静的・動的フィールドをまとめたデータクラス。
+
+    Attributes:
+        client_id: PyBullet クライアントの識別子（CLIENT_MAP からクライアントを取得する）。
+        robot: PandaRobot インスタンス（静的：接続後に変わらない）。
+        environment: テーブル・壁などの環境オブジェクト（静的）。
+        floor: 床の PyBullet 物体 ID（静的）。
+        objects: エピソード中に操作対象となる物体の ID リスト（動的：エピソード間で変化する）。
+        categories: objects に対応するカテゴリ名のリスト（動的）。
+        regions: 配置可能領域の物体 ID リスト（動的）。
+    """
+
     client_id: int
     robot: PandaRobot
     environment: Any
@@ -585,20 +662,32 @@ class World:
 
     @property
     def poses(self):
+        """objects の現在のワールド姿勢リストを返す。呼ぶたびに PyBullet を参照する。"""
         return [pbu.get_pose(o, client=self.client) for o in self.objects]
 
     @property
     def client(self):
+        """client_id から PyBullet クライアントオブジェクトを返す。"""
         return CLIENT_MAP[self.client_id]
 
 
 @dataclass
 class SceneState(State):
+    """TAMPURA の State を継承した Panda ロボット用のシーン状態クラス。
+
+    TAMPURA の最適化ループがこのクラスを通じてシミュレーション状態を読み書きする。
+
+    Attributes:
+        world: シミュレーション世界の情報（World 参照）。
+        grasp: 現在把持中の Grasp オブジェクト。把持していない場合は None。
+    """
+
     world: World
     grasp: Optional[Grasp] = None
 
     @property
     def current_q(self):
+        """現在のアーム関節角度リストを返す。"""
         return pbu.get_joint_positions(
             self.world.robot,
             self.world.robot.get_group_joints(ARM_GROUP, client=self.world.client),
@@ -607,9 +696,11 @@ class SceneState(State):
 
     @property
     def poses(self):
+        """world.objects の現在のワールド姿勢リストを返す。"""
         return self.world.poses
 
     def enforce_grasp(self):
+        """把持中の物体をツール先端に追従させるアタッチメントを毎ステップ適用する。"""
         tool_link = pbu.link_from_name(
             self.world.robot, PANDA_TOOL_TIP, client=self.world.client
         )
@@ -621,6 +712,21 @@ class SceneState(State):
     def apply_sequence(
         self, sequence: List[Command], teleport=False, sim_steps=0, time_step=5e-3
     ):  # None | INF
+        """コマンド列を実行してシミュレーション状態を更新する。
+
+        各コマンドを順に実行し、把持中の場合は毎ステップ enforce_grasp を呼ぶ。
+        GUI が有効な場合は time_step の待機でアニメーションを表示する。
+
+        Args:
+            sequence: 実行する Command のリスト（GroupTrajectory など）。
+            teleport: True の場合、軌跡を補間せず終端姿勢に瞬時に移動する。
+            sim_steps: 各コマンドステップ後に追加で実行する物理ステップ数。
+            time_step: ステップ間の待機時間（秒）。teleport=False の時に使用。
+
+        Note:
+            物理シミュレーションを直接操作する副作用がある。
+            実行後はシミュレーション内のロボット・物体の姿勢が変化する。
+        """
         assert sequence is not None
         frame_callback = getattr(self, "frame_callback", None)
         if frame_callback is not None:
@@ -647,22 +753,27 @@ class SceneState(State):
 
 
 def all_ycb_names() -> List[str]:
+    """利用可能な YCB オブジェクトのタイプ名リストを返す。"""
     return [ycb_type_from_file(path) for path in pbu.list_paths(YCB_PATH)]
 
 
 def all_ycb_paths() -> List[str]:
+    """YCB オブジェクトのディレクトリパス一覧を返す。"""
     return pbu.list_paths(YCB_PATH)
 
 
 def ycb_type_from_name(name: str) -> str:
+    """YCB ディレクトリ名（例: '003_cracker_box'）からタイプ名（'cracker_box'）を抽出する。"""
     return name.split("_", 1)[-1]
 
 
 def ycb_type_from_file(path: str) -> str:
+    """YCB ディレクトリのフルパスからタイプ名を抽出する。"""
     return ycb_type_from_name(os.path.basename(path))
 
 
 def get_ycb_obj_path(ycb_type: str, use_concave=False) -> Optional[str]:
+    """YCB タイプ名から .obj ファイルのパスを返す。存在しない場合は None。"""
     path_from_type = {
         ycb_type_from_file(path): path
         for path in pbu.list_paths(YCB_PATH)
@@ -688,6 +799,7 @@ def create_ycb(
     mass=-1,
     **kwargs,
 ) -> int:
+    """YCB オブジェクトをメッシュからロードして PyBullet シーンに追加する。"""
     concave_ycb_path = get_ycb_obj_path(name, use_concave=use_concave)
     ycb_path = get_ycb_obj_path(name)
 
@@ -723,6 +835,7 @@ TABLE_POSE = pbu.Pose((0.1, 0, -TABLE_AABB.upper[2]))
 def create_default_env(
     client=None, table_aabb=TABLE_AABB, table_pose=TABLE_POSE, **kwargs
 ):
+    """床・テーブル・ポストを配置してデフォルト環境を構築し、床と障害物リストを返す。"""
     client.resetDebugVisualizerCamera(
         cameraDistance=2,
         cameraYaw=90,
@@ -761,6 +874,7 @@ def add_table(
     table_pose: pbu.PoseType = TABLE_POSE,
     client=None,
 ) -> Tuple[int, List[int]]:
+    """テーブル天板と 80/20 アルミフレームのポスト・ビームを PyBullet シーンに追加する。"""
     # Panda table downstairs very roughly (few cm of error)
     table = pbu.create_box(
         table_width, table_length, table_thickness, color=color, client=client
@@ -816,6 +930,7 @@ def add_table(
 
 
 def pixel_from_point(camera_matrix, point_camera, width, height):
+    """カメラ座標系の 3D 点を画像座標（Pixel）に変換する。画面外の場合は None。"""
     px, py = pbu.pixel_from_ray(camera_matrix, point_camera)
     if (0 <= px < width) and (0 <= py < height):
         r, c = np.floor([py, px]).astype(int)
@@ -823,8 +938,8 @@ def pixel_from_point(camera_matrix, point_camera, width, height):
     return None
 
 
-# A smaller version of the table only containing the region in front of the robot
 def get_shortened_table_dims():
+    """ロボット正面だけを含む短いテーブルの姿勢と寸法を返す。"""
     TABLE_POSE = ((0.1 + 1.5 / 4, 0.0, -0.015), (0.0, 0.0, 0.0, 1.0))
     table_width = 0.75
     table_length = 1.22
@@ -833,7 +948,7 @@ def get_shortened_table_dims():
 
 
 def setup_robot_pybullet(gui=False):
-
+    """PyBullet クライアントを起動してロボット URDF をロードし、(robot_body, client) を返す。"""
     with pbu.HideOutput():
         client = bc.BulletClient(connection_mode=p.GUI if gui else p.DIRECT)
         client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
@@ -843,6 +958,7 @@ def setup_robot_pybullet(gui=False):
 
 
 def grasp_attachment(world: World, grasp: Grasp) -> pbu.Attachment:
+    """現在の把持（Grasp）をツール先端に固定する Attachment オブジェクトを生成する。"""
     tool_link = pbu.link_from_name(world.robot, PANDA_TOOL_TIP, client=world.client)
     attachment = grasp.create_attachment(
         world.robot, link=tool_link, client=world.client
@@ -851,6 +967,21 @@ def grasp_attachment(world: World, grasp: Grasp) -> pbu.Attachment:
 
 
 def grasp_ik(world, obj, pose, grasp, obstacles=[]):
+    """把持のための2段階カルテシアン経路（プリグラスプ → グラスプ）を計画する。
+
+    まず物体手前の安全位置（pregrasp）への経路を計画し、そこからグリッパーが
+    物体に接触する位置（grasp）まで直線的に進む経路を返す。
+
+    Args:
+        world: World インスタンス。
+        obj: 把持対象の PyBullet 物体 ID（現在は未使用だが将来の拡張のため残している）。
+        pose: 物体のワールド姿勢。
+        grasp: Grasp オブジェクト（pregrasp・grasp フィールドを持つ）。
+        obstacles: 衝突判定に含める障害物の物体 ID リスト。
+
+    Returns:
+        関節角度列（アーム経路）。IK が失敗した場合は None。
+    """
     pre_grasp_pose = pbu.multiply(pose, pbu.invert(grasp.pregrasp))
     grasp_pose = pbu.multiply(pose, pbu.invert(get_postgrasp(grasp.grasp)))
 
@@ -864,6 +995,7 @@ def grasp_ik(world, obj, pose, grasp, obstacles=[]):
 
 
 def ik(world, obj, pose, grasp):
+    """把持姿勢に対して IK を解き、把持時のアーム関節角度（単一コンフィグ）を返す。"""
     grasp_pose = pbu.multiply(pose, pbu.invert(grasp.grasp))
     arm_path = plan_workspace_motion(
         world.robot,
@@ -878,11 +1010,13 @@ def ik(world, obj, pose, grasp):
 
 
 def dimensions_from_camera_image(camera_image: pbu.CameraImage):
+    """CameraImage から画像の幅と高さ (width, height) をピクセル単位で返す。"""
     assert camera_image.rgbPixels.shape[:2] == camera_image.depthPixels.shape[:2]
     return camera_image.rgbPixels.shape[1], camera_image.rgbPixels.shape[0]
 
 
 def plan_motion(world, q1, q2, attachments=[], obstacles=[]):
+    """アームの関節角度 q1 から q2 への衝突回避経路を GroupTrajectory として返す。"""
     conf1 = GroupConf(
         body=world.robot,
         group=ARM_GROUP,
@@ -916,6 +1050,22 @@ def plan_motion(world, q1, q2, attachments=[], obstacles=[]):
 
 
 def pick_execute(state: SceneState, grasp, motion_plan, pre_grasp=[], full_close=False):
+    """pick 動作を実際に実行し、把持状態を確立する。
+
+    motion_plan（アプローチ経路）を実行したあと、グリッパーを閉じて物体を把持する。
+    pre_grasp が指定された場合は、把持前に手首の姿勢調整を行い、把持後に元の姿勢へ戻る。
+
+    Args:
+        state: 現在の SceneState（実行後に state.grasp が更新される）。
+        grasp: Grasp オブジェクト（グリッパーの閉じ位置 closed_position を含む）。
+        motion_plan: アプローチ経路の GroupTrajectory。
+        pre_grasp: 把持前の手首姿勢調整のための関節角度列。
+            把持後にこの列を逆順で実行して元の姿勢へ戻る。
+        full_close: True の場合、grasp.closed_position を無視して完全に閉じる（0）。
+
+    Note:
+        実行後に state.grasp が更新される（シミュレーション状態を変化させる副作用がある）。
+    """
     teleport = not pbu.has_gui(client=state.world.client)
     # teleport=True
     state.apply_sequence([motion_plan], teleport=teleport)
@@ -970,7 +1120,7 @@ def pick_execute(state: SceneState, grasp, motion_plan, pre_grasp=[], full_close
 
 
 def place_execute(state: SceneState, motion_plan, pre_grasp=[]):
-
+    """place 動作を実際に実行し、グリッパーを開いて把持を解除する。"""
     teleport = not pbu.has_gui(client=state.world.client)
     state.apply_sequence([motion_plan], teleport=teleport)
     state_grasp = state.grasp
@@ -1033,7 +1183,21 @@ def placement_sample(
     surface_pose: Optional[pbu.PoseType] = None,
     **kwargs,
 ):
+    """物体を置ける姿勢を surface 上でランダムにサンプリングする。
 
+    surface の AABB 内に収まる範囲で x・y 方向を一様分布でサンプリングし、
+    物体サイズを考慮した高さ z に配置する。回転角 theta も [0, 2π) で一様サンプリングする。
+
+    Args:
+        world: World インスタンス（PyBullet クライアントの参照に使用）。
+        obj: 配置対象の PyBullet 物体 ID（AABB でサイズを取得する）。
+        region: 配置先の表面物体 ID（surface_aabb / surface_pose が None の場合に使用）。
+        surface_aabb: 配置先の AABB。None の場合は region の AABB を使用する。
+        surface_pose: 配置先のワールド姿勢。None の場合は region の姿勢を使用する。
+
+    Returns:
+        物体の配置姿勢 (position, quaternion)（ワールド座標系）。
+    """
     # If surface_aabb and surface_pose are not provided, get them from the region
     if surface_aabb is None or surface_pose is None:
         surface_aabb = pbu.get_aabb(region, client=world.client)
