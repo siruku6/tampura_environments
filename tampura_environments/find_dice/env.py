@@ -24,7 +24,7 @@ import tampura_environments.panda_utils.pb_utils as pbu
 from tampura_environments.panda_utils.panda_env_utils import (
     ARM_GROUP, CLIENT_MAP, EXCLUDE_CLASSES, GRIPPER_GROUP, OPEN_GRIPPER_POS,
     SceneState, World, create_default_env, create_ycb,
-    dimensions_from_camera_image, get_grasp, get_shortened_table_dims,
+    get_grasp, get_shortened_table_dims,
     grasp_attachment, grasp_ik, ik, pick_execute, pixel_from_point,
     place_execute, placement_sample, plan_motion, plan_workspace_motion,
     pose_to_vec, setup_robot, transformation_to_pose)
@@ -151,7 +151,6 @@ class SceneBelief(Belief):
         self, camera_image: pbu.CameraImage, include_unseen=False
     ) -> List[Any]:
         voxels = []
-        width, height = dimensions_from_camera_image(camera_image)
 
         # For each voxel in the grid, check whether it was seen in the image
         for voxel in self.get_all_voxels():
@@ -164,7 +163,7 @@ class SceneBelief(Belief):
                 )
                 distance = center_camera[2]
                 pixel = pixel_from_point(
-                    camera_image.camera_matrix, center_camera, width, height
+                    camera_image.camera_matrix, center_camera
                 )
                 if pixel is not None:
                     depth = camera_image.depthPixels[pixel.row, pixel.column]
